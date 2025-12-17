@@ -1,53 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hand Particle System</title>
+    <title>Hand Morphing Particles</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
-        #canvas-container { width: 100vw; height: 100vh; }
-        
-        /* Permission Box */
-        #setup-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.9); display: flex; align-items: center;
-            justify-content: center; z-index: 100; color: white; text-align: center;
-        }
-        .modal {
-            background: #1a1a1a; padding: 40px; border-radius: 20px;
-            border: 1px solid #444; max-width: 400px;
-        }
-        button {
-            background: #007bff; color: white; border: none; padding: 12px 24px;
-            border-radius: 8px; cursor: pointer; font-size: 16px; margin-top: 20px;
-        }
-        button:hover { background: #0056b3; }
-
-        /* Error UI */
-        #error-msg { display: none; color: #ff4444; margin-top: 20px; font-size: 14px; }
-        
-        #video { display: none; }
-        .hud { position: absolute; top: 20px; left: 20px; color: rgba(255,255,255,0.5); pointer-events: none; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #v-preview { position: absolute; top: 10px; right: 10px; width: 120px; height: 90px; border-radius: 8px; transform: scaleX(-1); border: 1px solid #333; z-index: 5; }
+        .hud { position: absolute; top: 20px; left: 20px; color: cyan; z-index: 10; pointer-events: none; text-transform: uppercase; letter-spacing: 2px; }
+        #msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; z-index: 100; }
+        button { background: #0088ff; color: white; border: none; padding: 15px 30px; border-radius: 30px; cursor: pointer; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div id="setup-overlay">
-        <div class="modal">
-            <h2>Camera Required</h2>
-            <p>This experience uses hand tracking to control the particles. Please allow camera access when prompted by Chrome.</p>
-            <button id="start-btn">Enable Camera</button>
-            <div id="error-msg">
-                <strong>Error:</strong> Camera blocked. <br> 
-                Click the <b>Lock Icon</b> next to the URL bar and set Camera to "Allow", then refresh.
-            </div>
-        </div>
+    <div id="msg">
+        <h2>Hand Gesture Particles</h2>
+        <p>Open Palm to Zoom In | Close Fist to Zoom Out & Form Shape</p>
+        <button onclick="start()">START CAMERA</button>
     </div>
 
-    <div class="hud">Hand Particles Active</div>
-    <video id="video" playsinline></video>
-    <div id="canvas-container"></div>
+    <video id="v-preview" autoplay playsinline></video>
+    <div class="hud" id="status">Waiting for hand...</div>
+    <div id="container"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -55,67 +29,107 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 
     <script>
-        let scene, camera, renderer, particles;
-        const count = 2000;
+        let scene, camera, renderer, pts, currentMode = 'sphere';
+        const count = 3000;
 
-        // Init 3D Scene
         function initThree() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.z = 4;
+            camera.position.z = 5;
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            document.getElementById('container').appendChild(renderer.domElement);
 
             const geo = new THREE.BufferGeometry();
             const pos = new Float32Array(count * 3);
-            for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5)*10;
-            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-            
-            const mat = new THREE.PointsMaterial({ size: 0.05, color: 0x00ffff, transparent: true, opacity: 0.8 });
-            particles = new THREE.Points(geo, mat);
-            scene.add(particles);
-        }
-
-        // Start Tracking
-        async function startCamera() {
-            const videoElement = document.getElementById('video');
-            const errorElement = document.getElementById('error-msg');
-            
-            try {
-                const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-                hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
-                
-                hands.onResults((results) => {
-                    if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
-                        const landmark = results.multiHandLandmarks[0][8]; // Index finger
-                        particles.position.x = (landmark.x - 0.5) * -10;
-                        particles.position.y = (landmark.y - 0.5) * -10;
-                    }
-                });
-
-                const cam = new Camera(videoElement, {
-                    onFrame: async () => { await hands.send({image: videoElement}); },
-                    width: 640, height: 480
-                });
-
-                await cam.start();
-                document.getElementById('setup-overlay').style.display = 'none'; // Hide modal on success
-                animate();
-            } catch (err) {
-                console.error(err);
-                errorElement.style.display = 'block';
+            const cols = new Float32Array(count * 3);
+            for(let i=0; i<count*3; i++) {
+                pos[i] = (Math.random()-0.5)*10;
+                cols[i] = Math.random();
             }
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+
+            const mat = new THREE.PointsMaterial({ size: 0.04, vertexColors: true, blending: THREE.AdditiveBlending });
+            pts = new THREE.Points(geo, mat);
+            scene.add(pts);
         }
 
-        function animate() {
-            requestAnimationFrame(animate);
-            particles.rotation.y += 0.01;
+        function getTargetPos(shape, i) {
+            const t = (i / count) * Math.PI * 2;
+            const phi = Math.acos(-1 + (2 * i) / count);
+            const theta = Math.sqrt(count * Math.PI) * phi;
+
+            if(shape === 'heart') {
+                return { x: 2 * Math.pow(Math.sin(t), 3), y: (1.5 * Math.cos(t) - 0.6 * Math.cos(2*t) - 0.2 * Math.cos(3*t)), z: (Math.random()-0.5) };
+            }
+            // Default Sphere
+            return { x: Math.cos(theta)*Math.sin(phi)*2, y: Math.sin(theta)*Math.sin(phi)*2, z: Math.cos(phi)*2 };
+        }
+
+        function morphTo(shape) {
+            if(currentMode === shape) return;
+            currentMode = shape;
+            const pa = pts.geometry.attributes.position.array;
+            for(let i=0; i<count; i++) {
+                const target = getTargetPos(shape, i);
+                gsap.to(pa, { [i*3]: target.x, [i*3+1]: target.y, [i*3+2]: target.z, duration: 1.2, ease: "power2.out" });
+            }
+            document.getElementById('status').innerText = shape === 'heart' ? "Fist: Heart Formed" : "Open: Expanding";
+        }
+
+        async function start() {
+            document.getElementById('msg').style.display = 'none';
+            initThree();
+            
+            const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            hands.setOptions({maxNumHands: 1, modelComplexity: 1});
+            
+            hands.onResults(res => {
+                if(res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+                    const lm = res.multiHandLandmarks[0];
+                    const wrist = lm[0];
+                    const indexTip = lm[8];
+
+                    // Movement Tracking
+                    pts.position.x = (wrist.x - 0.5) * -10;
+                    pts.position.y = (wrist.y - 0.5) * -10;
+
+                    // Calculate "Fist" vs "Open" (Distance from wrist to index tip)
+                    const dist = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y);
+                    
+                    if(dist < 0.25) { // FIST GESTURE
+                        morphTo('heart');
+                        gsap.to(pts.scale, { x: 0.5, y: 0.5, z: 0.5, duration: 0.5 }); // Zoom Out
+                    } else { // OPEN PALM
+                        morphTo('sphere');
+                        gsap.to(pts.scale, { x: 2.0, y: 2.0, z: 2.0, duration: 0.5 }); // Zoom In
+                    }
+                }
+            });
+
+            const cam = new Camera(document.getElementById('v-preview'), {
+                onFrame: async () => { 
+                    await hands.send({image: document.getElementById('v-preview')});
+                    pts.geometry.attributes.position.needsUpdate = true;
+                },
+                width: 640, height: 480
+            });
+            cam.start();
+            loop();
+        }
+
+        function loop() {
+            requestAnimationFrame(loop);
+            pts.rotation.y += 0.01;
             renderer.render(scene, camera);
         }
 
-        initThree();
-        document.getElementById('start-btn').addEventListener('click', startCamera);
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
